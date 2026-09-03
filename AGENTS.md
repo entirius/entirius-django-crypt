@@ -26,6 +26,7 @@ Symmetric encryption helper (Fernet) for Volkanos Django modules — distributio
 ```
 src/django_crypt/
 ├── __init__.py             # Crypt class (encrypt/decrypt/generate_salt)
+├── fields.py               # CryptedTextField — transparently-encrypted model field
 ├── apps.py                 # DjangoCryptConfig (is_volkanos=True)
 ├── settings.py             # CRYPT_SALT (loaded from django.conf.settings)
 └── management/commands/
@@ -34,7 +35,7 @@ src/django_crypt/
     └── generate_salt.py    # ./manage.py generate_salt
 ```
 
-No models, no migrations — pure helper + management commands.
+No models, no migrations — a helper, a model field, and management commands.
 
 ## Public API
 
@@ -62,6 +63,18 @@ class Crypt:
         # Raises cryptography.fernet.InvalidToken on bad input
 ```
 
+```python
+from django_crypt.fields import CryptedTextField
+
+class CryptedTextField(models.TextField):
+    # Encrypts on write (get_prep_value) via Crypt, decrypts on read (from_db_value).
+    # __init__ raises ValueError on db_index=True / unique=True / primary_key=True
+    #   (Fernet ciphertext is non-deterministic — an index/unique/PK could never match).
+    # from_db_value: on decryption failure logs (field + model name only, never the
+    #   ciphertext) and returns "" — never returns raw ciphertext (avoids garbage flowing
+    #   to consumers and double-encryption on next save).
+```
+
 ## Settings
 
 | Setting | Default | Purpose |
@@ -80,6 +93,9 @@ class Crypt:
   `Crypt(salt=new)` for write, then bulk re-encrypt.
 - **Errors leak structure** — `decrypt()` on garbage raises `cryptography.fernet.InvalidToken`.
   Don't surface raw exception in HTTP responses (info leak).
+- **`CryptedTextField` can't be filtered or searched** — encrypted values aren't queryable, and the
+  field refuses `db_index`/`unique`/`primary_key`. Don't seed its secrets via fixtures (YAML can't
+  carry the encrypted form) — set them via admin/API instead.
 
 ## References
 
