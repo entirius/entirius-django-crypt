@@ -10,7 +10,7 @@ Requires Python 3.11+.
 ```bash
 make install   # uv venv + install deps
 make test      # run tests
-make lint      # ruff check + format
+make check     # ruff lint + format check
 ```
 
 ## Usage
@@ -28,6 +28,27 @@ assert decrypted == "secret value"
 salt = Crypt.generate_salt()               # static method
 print(f"Save this in settings.CRYPT_SALT: {salt}")
 ```
+
+### Transparently-encrypted model field
+
+`CryptedTextField` encrypts on write and decrypts on read — call sites use plaintext:
+
+```python
+from django.db import models
+
+from django_crypt.fields import CryptedTextField
+
+
+class PaymentProviderConfig(models.Model):
+    client_id = CryptedTextField(default="")
+    client_secret = CryptedTextField(default="")
+```
+
+- Cannot be `db_index`, `unique`, or `primary_key` (Fernet ciphertext is non-deterministic) —
+  those raise `ValueError` at declaration time.
+- On decryption failure (salt rotation, row corruption) it logs and returns `""` (never the raw
+  ciphertext), so `if not config.client_secret: skip` degrades gracefully.
+- Do **not** seed secrets into this field via fixtures — YAML can't carry the encrypted form.
 
 ## Management Commands
 
