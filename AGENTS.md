@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Symmetric encryption helper (Fernet) for Volkanos Django modules — distribution `entirius-django-crypt`, Django app `django_crypt`.
+`entirius-django-crypt` (Django app `django_crypt`) — symmetric encryption helper (Fernet) for Entirius Django modules.
 
 ## Commands
 
@@ -20,6 +20,7 @@ Symmetric encryption helper (Fernet) for Volkanos Django modules — distributio
 - Never rename the package / Django app_label / DB table prefix `django_crypt` — it is a schema contract.
 - Migrations are part of the public contract — never edit an already released migration.
 - Default: do not commit — git is the user's call.
+- No AI attribution in commits or PR descriptions.
 
 ## Architecture
 
@@ -36,7 +37,7 @@ src/django_crypt/
 
 No models, no migrations — pure helper + management commands.
 
-## Public API
+Public API:
 
 ```python
 from django_crypt import Crypt
@@ -62,6 +63,11 @@ class Crypt:
         # Raises cryptography.fernet.InvalidToken on bad input
 ```
 
+| Topic | Where |
+|---|---|
+| Fernet format and guarantees | https://cryptography.io/en/latest/fernet/ |
+| Usage and installation | `README.md` |
+
 ## Settings
 
 | Setting | Default | Purpose |
@@ -80,7 +86,3 @@ class Crypt:
   `Crypt(salt=new)` for write, then bulk re-encrypt.
 - **Errors leak structure** — `decrypt()` on garbage raises `cryptography.fernet.InvalidToken`.
   Don't surface raw exception in HTTP responses (info leak).
-
-## References
-
-- [Fernet docs](https://cryptography.io/en/latest/fernet/)
