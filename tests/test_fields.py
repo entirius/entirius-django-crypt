@@ -2,17 +2,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-"""Tests for CryptedTextField — constructor guards, prep/read hooks, ORM round-trip, fail-soft read, log redaction."""
+"""Tests for CryptedTextField — constructor guards, prep/read hooks, ORM round-trip, fail-loud read, log redaction."""
 
 import contextlib
 import logging
 
 import pytest
+from cryptography.fernet import InvalidToken
 from django.db import connection, models
 from django.test.utils import isolate_apps
 
 from django_crypt import Crypt
-from django_crypt.fields import CryptedTextField
+from django_crypt.fields import CryptedTextField, DecryptionError
 
 
 class TestConstructorGuards:
@@ -53,10 +54,12 @@ class TestHooks:
         assert Crypt().decrypt(ciphertext) == "s3cr3t"
         assert field.from_db_value(ciphertext, None, None) == "s3cr3t"
 
-    def test_decrypt_failure_returns_empty_not_ciphertext(self):
+    def test_decrypt_failure_raises_without_echoing_the_value(self):
         field = CryptedTextField()
-        field.set_attributes_from_name("secret")  # so the log line has a field name
-        assert field.from_db_value("not-a-fernet-token", None, None) == ""
+        field.set_attributes_from_name("secret")
+        with pytest.raises(DecryptionError, match=r"\?\.secret") as excinfo:
+            field.from_db_value("not-a-fernet-token", None, None)
+        assert "not-a-fernet-token" not in str(excinfo.value)
 
     def test_missing_salt_raises_instead_of_reading_empty(self, settings):
         ciphertext = CryptedTextField().get_prep_value("s3cr3t")
@@ -93,6 +96,12 @@ def _temp_model():
                 editor.delete_model(SecretHolder)
 
 
+def _raw_secret(model, pk) -> str:
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT secret FROM {model._meta.db_table} WHERE id = %s", [pk])  # noqa: S608
+        return cursor.fetchone()[0]
+
+
 @pytest.mark.django_db(transaction=True)
 class TestOrmRoundTrip:
     def test_column_holds_ciphertext_and_orm_reads_plaintext(self):
@@ -107,7 +116,7 @@ class TestOrmRoundTrip:
 
             assert model.objects.get(pk=obj.pk).secret == "client-secret-123"
 
-    def test_corrupted_row_reads_as_empty(self):
+    def test_corrupted_row_raises_and_keeps_the_stored_value(self):
         with _temp_model() as model:
             obj = model.objects.create(secret="value")  # noqa: S106 - field name, not a credential
             with connection.cursor() as cursor:
@@ -115,6 +124,21 @@ class TestOrmRoundTrip:
                     f"UPDATE {model._meta.db_table} SET secret = %s WHERE id = %s",  # noqa: S608
                     ["not-a-fernet-token", obj.pk],
                 )
+            with pytest.raises(DecryptionError, match=r"SecretHolder\.secret") as excinfo:
+                model.objects.get(pk=obj.pk)
+            assert isinstance(excinfo.value.__cause__, InvalidToken)
+            assert "not-a-fernet-token" not in str(excinfo.value)
+            assert _raw_secret(model, obj.pk) == "not-a-fernet-token"
+
+    def test_queryset_update_blanks_an_unreadable_row(self):
+        with _temp_model() as model:
+            obj = model.objects.create(secret="value")  # noqa: S106 - field name, not a credential
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"UPDATE {model._meta.db_table} SET secret = %s WHERE id = %s",  # noqa: S608
+                    ["not-a-fernet-token", obj.pk],
+                )
+            model.objects.filter(pk=obj.pk).update(secret="")
             assert model.objects.get(pk=obj.pk).secret == ""
 
 
@@ -130,13 +154,15 @@ class TestFailureLogging:
                 ciphertext = cursor.fetchone()[0]
 
             settings.CRYPT_SALT = Crypt.generate_salt()  # rotated key — the stored row no longer decrypts
-            with caplog.at_level(logging.ERROR, logger="process"):
-                assert model.objects.get(pk=obj.pk).secret == ""
+            with caplog.at_level(logging.ERROR, logger="process"), pytest.raises(DecryptionError) as excinfo:
+                model.objects.get(pk=obj.pk)
 
             logged = [record.getMessage() for record in caplog.records if record.name == "process"]
             assert logged, "the failure must be logged on the 'process' channel"
             assert "SecretHolder.secret" in logged[0]
             assert ciphertext not in caplog.text
+            assert ciphertext not in str(excinfo.value)
+            assert "novatrade-api-token" not in str(excinfo.value)
 
 
 @pytest.mark.django_db(transaction=True)

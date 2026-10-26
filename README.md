@@ -68,8 +68,14 @@ class PaymentProviderConfig(models.Model):
 
 - `db_index`, `unique` and `primary_key` raise `ValueError` at declaration: ciphertext differs on every save, so the
   column can't be indexed, filtered or searched.
-- A value that no longer decrypts (key rotated, row corrupted) is logged and read as `""`; the raw ciphertext is never
-  returned. A missing or malformed `CRYPT_SALT` raises instead.
+- A value that no longer decrypts (key rotated, row corrupted) raises `django_crypt.fields.DecryptionError` on load.
+  The error and the log line name model and field, never the ciphertext or the plaintext. The field never reads such a
+  row as `""`: the next `save()` would write `""` over the ciphertext and the secret would be gone. Loading that row
+  fails, its admin change page included, until you either restore the `CRYPT_SALT` it was written with, or blank it
+  on purpose with `PaymentProviderConfig.objects.filter(pk=...).update(client_secret="")` (`update()` never reads the old value).
+  A missing or malformed `CRYPT_SALT` raises `ValueError`.
+- The local `EncryptedTextField` in entirius-django-communicator and entirius-django-contact-forms still reads an
+  undecryptable value as `""`. Moving them onto `CryptedTextField` is a follow-up.
 - `dumpdata` writes the decrypted plaintext; `loaddata` encrypts on save. Don't commit fixtures with real secrets.
 
 ## Requirements

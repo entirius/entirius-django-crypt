@@ -11,12 +11,12 @@ primary-key encrypted column would never match. Those are refused at declaration
 mistake surfaces at `manage.py check`, not in production.
 
 On decryption failure (`InvalidToken`: salt rotation, row corruption) the field logs a generic message —
-field + model name only, never the ciphertext — and returns `""`. Returning the raw ciphertext
-would (a) flow garbage into consuming code and (b) get re-encrypted on the next save,
-permanently corrupting the row. Empty-string-on-failure lets the standard
-`if not config.secret: skip` pattern degrade gracefully. A missing or malformed `CRYPT_SALT` is a
-configuration error, not row damage: it raises, so a misconfigured deploy can't read every row as `""`
-and wipe it on the next save.
+model + field name only, never the ciphertext — and raises `DecryptionError`. It never returns a value
+for such a row: the raw ciphertext would flow into consuming code and get re-encrypted on the next save,
+and `""` would be written over the ciphertext by the next `save()`, losing the secret for good. Loading
+the row fails loud until an operator restores the right `CRYPT_SALT` or blanks the column with
+`QuerySet.update()`, which never reads it. A missing or malformed `CRYPT_SALT` is a configuration error,
+not row damage: it raises `ValueError` from `Crypt` as before.
 """
 
 import logging
@@ -29,6 +29,14 @@ from django_crypt import Crypt
 logger = logging.getLogger("process")
 
 _FORBIDDEN_KWARGS = ("db_index", "unique", "primary_key")
+
+
+class DecryptionError(Exception):
+    """A stored `CryptedTextField` value doesn't decrypt with the current `CRYPT_SALT`.
+
+    Raised instead of returning a value, so the row can't be silently overwritten on the next save.
+    The message names model and field only — never the ciphertext or the plaintext.
+    """
 
 
 class CryptedTextField(models.TextField):
@@ -53,7 +61,9 @@ class CryptedTextField(models.TextField):
             return value
         try:
             return Crypt().decrypt(value)
-        except InvalidToken:  # row-level damage; a missing/malformed CRYPT_SALT must fail loud
+        except InvalidToken as exc:  # row-level damage; a missing/malformed CRYPT_SALT raises ValueError in Crypt
             model_name = getattr(getattr(self, "model", None), "__name__", "?")
-            logger.error("CryptedTextField decryption failed (field=%s.%s) — returning empty", model_name, self.name)
-            return ""
+            logger.error("CryptedTextField decryption failed (field=%s.%s)", model_name, self.name)
+            raise DecryptionError(
+                f"{model_name}.{self.name} does not decrypt with the current CRYPT_SALT (salt rotated or row corrupted)"
+            ) from exc

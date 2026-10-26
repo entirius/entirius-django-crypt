@@ -71,8 +71,12 @@ class CryptedTextField(models.TextField):
     # Encrypts on write (get_prep_value) via Crypt, decrypts on read (from_db_value).
     # __init__ raises ValueError on db_index=True / unique=True / primary_key=True
     #   (Fernet ciphertext is non-deterministic — an index/unique/PK could never match).
-    # from_db_value: on InvalidToken logs (field + model name only, never the ciphertext)
-    #   and returns "". A missing/malformed CRYPT_SALT raises (config error, not row damage).
+    # from_db_value: on InvalidToken logs (model + field name only, never the ciphertext)
+    #   and raises DecryptionError (from InvalidToken). A missing/malformed CRYPT_SALT raises
+    #   ValueError (config error, not row damage).
+
+class DecryptionError(Exception):
+    # Stored value doesn't decrypt with the current CRYPT_SALT. Message: model + field only.
 ```
 
 | Topic | Where |
@@ -101,5 +105,9 @@ class CryptedTextField(models.TextField):
 - **`CryptedTextField` can't be filtered or searched** — `filter(secret=x)` never matches, and the field refuses
   `db_index`/`unique`/`primary_key`. `dumpdata` exports the decrypted plaintext and `loaddata` re-encrypts it, so
   fixtures and dumps carry secrets in clear text.
-- **A row read as `""` is overwritten on the next save** — `CryptedTextField` returns `""` for a value that no longer
-  decrypts, and saving that instance writes `""` over the old ciphertext.
+- **An undecryptable row raises, on purpose** — `CryptedTextField` raises `DecryptionError` instead of reading `""`,
+  because the next `save()` of a `""` read would overwrite the ciphertext for good. Loading the row (admin change page
+  included) fails until the original `CRYPT_SALT` is back or the column is blanked with `QuerySet.update(field="")`,
+  which skips `from_db_value`. `.defer("field")` loads the rest of the row. Never "fix" it by catching and returning `""`.
+- **communicator / contact-forms `EncryptedTextField` differ** — they still read an undecryptable value as `""`.
+  Consolidating them onto `CryptedTextField` is a follow-up.
