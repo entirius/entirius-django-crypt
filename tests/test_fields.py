@@ -58,6 +58,18 @@ class TestHooks:
         field.set_attributes_from_name("secret")  # so the log line has a field name
         assert field.from_db_value("not-a-fernet-token", None, None) == ""
 
+    def test_missing_salt_raises_instead_of_reading_empty(self, settings):
+        ciphertext = CryptedTextField().get_prep_value("s3cr3t")
+        settings.CRYPT_SALT = None
+        with pytest.raises(ValueError, match="CRYPT_SALT"):
+            CryptedTextField().from_db_value(ciphertext, None, None)
+
+    def test_malformed_salt_raises_instead_of_reading_empty(self, settings):
+        ciphertext = CryptedTextField().get_prep_value("s3cr3t")
+        settings.CRYPT_SALT = "not-a-fernet-key"
+        with pytest.raises(ValueError):
+            CryptedTextField().from_db_value(ciphertext, None, None)
+
 
 @contextlib.contextmanager
 def _temp_model():
