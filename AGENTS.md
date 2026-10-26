@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Symmetric encryption helper (Fernet) for Volkanos Django modules — distribution `entirius-django-crypt`, Django app `django_crypt`.
+`entirius-django-crypt` (Django app `django_crypt`) — symmetric encryption helper (Fernet) for Entirius Django modules.
 
 ## Commands
 
@@ -20,6 +20,7 @@ Symmetric encryption helper (Fernet) for Volkanos Django modules — distributio
 - Never rename the package / Django app_label / DB table prefix `django_crypt` — it is a schema contract.
 - Migrations are part of the public contract — never edit an already released migration.
 - Default: do not commit — git is the user's call.
+- No AI attribution in commits or PR descriptions.
 
 ## Architecture
 
@@ -37,7 +38,7 @@ src/django_crypt/
 
 No models, no migrations — a helper, a model field, and management commands.
 
-## Public API
+Public API:
 
 ```python
 from django_crypt import Crypt
@@ -70,10 +71,14 @@ class CryptedTextField(models.TextField):
     # Encrypts on write (get_prep_value) via Crypt, decrypts on read (from_db_value).
     # __init__ raises ValueError on db_index=True / unique=True / primary_key=True
     #   (Fernet ciphertext is non-deterministic — an index/unique/PK could never match).
-    # from_db_value: on decryption failure logs (field + model name only, never the
-    #   ciphertext) and returns "" — never returns raw ciphertext (avoids garbage flowing
-    #   to consumers and double-encryption on next save).
+    # from_db_value: on InvalidToken logs (field + model name only, never the ciphertext)
+    #   and returns "". A missing/malformed CRYPT_SALT raises (config error, not row damage).
 ```
+
+| Topic | Where |
+|---|---|
+| Fernet format and guarantees | https://cryptography.io/en/latest/fernet/ |
+| Usage and installation | `README.md` |
 
 ## Settings
 
@@ -93,10 +98,8 @@ class CryptedTextField(models.TextField):
   `Crypt(salt=new)` for write, then bulk re-encrypt.
 - **Errors leak structure** — `decrypt()` on garbage raises `cryptography.fernet.InvalidToken`.
   Don't surface raw exception in HTTP responses (info leak).
-- **`CryptedTextField` can't be filtered or searched** — encrypted values aren't queryable, and the
-  field refuses `db_index`/`unique`/`primary_key`. Don't seed its secrets via fixtures (YAML can't
-  carry the encrypted form) — set them via admin/API instead.
-
-## References
-
-- [Fernet docs](https://cryptography.io/en/latest/fernet/)
+- **`CryptedTextField` can't be filtered or searched** — `filter(secret=x)` never matches, and the field refuses
+  `db_index`/`unique`/`primary_key`. `dumpdata` exports the decrypted plaintext and `loaddata` re-encrypts it, so
+  fixtures and dumps carry secrets in clear text.
+- **A row read as `""` is overwritten on the next save** — `CryptedTextField` returns `""` for a value that no longer
+  decrypts, and saving that instance writes `""` over the old ciphertext.

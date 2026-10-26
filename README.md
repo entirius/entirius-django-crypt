@@ -1,37 +1,60 @@
-# django-crypt
+# entirius-django-crypt
 
-Symmetric encryption helper (Fernet) for Volkanos Django modules. Wraps `cryptography.fernet`
-with a salt loaded from `settings.CRYPT_SALT`.
+A Django helper for symmetric encryption in Entirius, the open-source modular ecommerce platform: Fernet encrypt and decrypt with one key from settings.
+It wraps `cryptography.fernet` in a small `Crypt` class and ships management commands for the same operations.
 
-## Quick Start
+[![PyPI](https://img.shields.io/pypi/v/entirius-django-crypt.svg)](https://pypi.org/project/entirius-django-crypt/)
+[![Python](https://img.shields.io/pypi/pyversions/entirius-django-crypt.svg)](https://pypi.org/project/entirius-django-crypt/)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/entirius/entirius-django-crypt/blob/develop/LICENSE)
 
-Requires Python 3.11+.
+## What it does
 
-```bash
-make install   # uv venv + install deps
-make test      # run tests
-make check     # ruff lint + format check
+- Encrypts and decrypts strings with Fernet, using the key in `settings.CRYPT_SALT` or one passed to `Crypt(salt=...)`.
+- Generates a Fernet-compatible key with `Crypt.generate_salt()`.
+- Passes `None` through unchanged, so nullable fields need no guard.
+- Ships the management commands `generate_salt`, `encrypt` and `decrypt`.
+- Ships `CryptedTextField`, a model `TextField` encrypted at rest: call sites read and write plaintext.
+- Produces non-deterministic ciphertext: the same plaintext encrypts to a different value each time, so use a
+  separate deterministic hash (for example HMAC-SHA256) for unique or lookup columns.
+
+## Installation
+
+```shell
+uv add entirius-django-crypt
+pip install entirius-django-crypt
 ```
 
-## Usage
+```python
+INSTALLED_APPS = [
+    ...
+    "django_crypt",
+]
+
+CRYPT_SALT = "<output of generate_salt>"
+```
+
+```shell
+python manage.py generate_salt           # print a fresh key
+python manage.py encrypt "plain text"    # encrypt a string
+python manage.py decrypt "<ciphertext>"  # decrypt a string
+```
+
+Required setting: `CRYPT_SALT`; reference in
+https://github.com/entirius/entirius-django-crypt/blob/develop/AGENTS.md (section Settings).
+
+## Quick start
 
 ```python
 from django_crypt import Crypt
 
-# Encrypt / decrypt
 crypt = Crypt()                            # uses settings.CRYPT_SALT
 encrypted = crypt.encrypt("secret value")
-decrypted = crypt.decrypt(encrypted)
-assert decrypted == "secret value"
+assert crypt.decrypt(encrypted) == "secret value"
 
-# Generate fresh salt (for first-time setup)
-salt = Crypt.generate_salt()               # static method
-print(f"Save this in settings.CRYPT_SALT: {salt}")
+salt = Crypt.generate_salt()               # a fresh key for first-time setup
 ```
 
-### Transparently-encrypted model field
-
-`CryptedTextField` encrypts on write and decrypts on read — call sites use plaintext:
+An encrypted model field:
 
 ```python
 from django.db import models
@@ -40,38 +63,45 @@ from django_crypt.fields import CryptedTextField
 
 
 class PaymentProviderConfig(models.Model):
-    client_id = CryptedTextField(default="")
     client_secret = CryptedTextField(default="")
 ```
 
-- Cannot be `db_index`, `unique`, or `primary_key` (Fernet ciphertext is non-deterministic) —
-  those raise `ValueError` at declaration time.
-- On decryption failure (salt rotation, row corruption) it logs and returns `""` (never the raw
-  ciphertext), so `if not config.client_secret: skip` degrades gracefully.
-- Do **not** seed secrets into this field via fixtures — YAML can't carry the encrypted form.
+- `db_index`, `unique` and `primary_key` raise `ValueError` at declaration: ciphertext differs on every save, so the
+  column can't be indexed, filtered or searched.
+- A value that no longer decrypts (key rotated, row corrupted) is logged and read as `""`; the raw ciphertext is never
+  returned. A missing or malformed `CRYPT_SALT` raises instead.
+- `dumpdata` writes the decrypted plaintext; `loaddata` encrypts on save. Don't commit fixtures with real secrets.
 
-## Management Commands
+## Requirements
 
-```bash
-python manage.py generate_salt           # generate fresh salt
-python manage.py encrypt "plain text"    # encrypt a string
-python manage.py decrypt "<ciphertext>"  # decrypt a string
+- Python 3.11 or newer, Django 4.0 or newer.
+- `cryptography` 42.0 or newer.
+- No database tables and no other Entirius packages.
+
+## Documentation
+
+- Entirius documentation: https://docs.entirius.com/
+- Releases: https://github.com/entirius/entirius-django-crypt/releases
+- Fernet specification: https://cryptography.io/en/latest/fernet/
+
+## Part of Entirius
+
+This module installs into the Entirius backend service (Volkanos) as a standalone helper with no database tables.
+
+- Backend service: https://github.com/entirius/entirius-service-volkanos
+- Docker harness: https://github.com/entirius/entirius-zeno
+- Sibling modules: https://github.com/entirius/entirius-django-utils
+
+## Development
+
+```shell
+make install     # sync dependencies (uv)
+make check       # lint + format check (ruff)
+make test        # test suite (pytest + pytest-django)
 ```
 
-## Settings
+Development and agent instructions: https://github.com/entirius/entirius-django-crypt/blob/develop/AGENTS.md
 
-```python
-# In Django settings.py
-CRYPT_SALT = "<output of generate_salt>"
-INSTALLED_APPS = [..., "django_crypt"]
-```
+## License
 
-## Important
-
-Fernet ciphertexts are **non-deterministic** — encrypting the same plaintext twice yields
-different ciphertexts. For deterministic lookup hashing (e.g. unique-indexed code lookup),
-use a separate HMAC-SHA256 helper, not `Crypt.encrypt()`.
-
-## Details
-
-See [`AGENTS.md`](AGENTS.md) for architecture and integration details.
+Mozilla Public License 2.0 (MPL-2.0) — see https://github.com/entirius/entirius-django-crypt/blob/develop/LICENSE.
