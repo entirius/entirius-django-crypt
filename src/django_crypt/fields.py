@@ -10,11 +10,13 @@ Fernet ciphertext is non-deterministic (a fresh IV per save), so an indexed / un
 primary-key encrypted column would never match. Those are refused at declaration time so the
 mistake surfaces at `manage.py check`, not in production.
 
-On decryption failure (salt rotation, row corruption) the field logs a generic message —
+On decryption failure (`InvalidToken`: salt rotation, row corruption) the field logs a generic message —
 field + model name only, never the ciphertext — and returns `""`. Returning the raw ciphertext
 would (a) flow garbage into consuming code and (b) get re-encrypted on the next save,
 permanently corrupting the row. Empty-string-on-failure lets the standard
-`if not config.secret: skip` pattern degrade gracefully.
+`if not config.secret: skip` pattern degrade gracefully. A missing or malformed `CRYPT_SALT` is a
+configuration error, not row damage: it raises, so a misconfigured deploy can't read every row as `""`
+and wipe it on the next save.
 """
 
 import logging
@@ -51,7 +53,7 @@ class CryptedTextField(models.TextField):
             return value
         try:
             return Crypt().decrypt(value)
-        except (InvalidToken, ValueError, TypeError):
+        except InvalidToken:  # row-level damage; a missing/malformed CRYPT_SALT must fail loud
             model_name = getattr(getattr(self, "model", None), "__name__", "?")
             logger.error("CryptedTextField decryption failed (field=%s.%s) — returning empty", model_name, self.name)
             return ""
