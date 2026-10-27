@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.0rc1
+## 2.1.0 — 2026-10-27
 
 - `CryptedTextField` (`django_crypt.fields`): a `TextField` encrypted at rest with `Crypt` — call sites read and write
   plaintext. Refuses `db_index`, `unique` and `primary_key` at declaration (Fernet ciphertext differs on every save).
