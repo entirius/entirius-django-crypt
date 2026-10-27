@@ -27,6 +27,7 @@
 ```
 src/django_crypt/
 ├── __init__.py             # Crypt class (encrypt/decrypt/generate_salt)
+├── fields.py               # CryptedTextField — transparently-encrypted model field
 ├── apps.py                 # DjangoCryptConfig (is_volkanos=True)
 ├── settings.py             # CRYPT_SALT (loaded from django.conf.settings)
 └── management/commands/
@@ -35,7 +36,7 @@ src/django_crypt/
     └── generate_salt.py    # ./manage.py generate_salt
 ```
 
-No models, no migrations — pure helper + management commands.
+No models, no migrations — a helper, a model field, and management commands.
 
 Public API:
 
@@ -63,6 +64,21 @@ class Crypt:
         # Raises cryptography.fernet.InvalidToken on bad input
 ```
 
+```python
+from django_crypt.fields import CryptedTextField
+
+class CryptedTextField(models.TextField):
+    # Encrypts on write (get_prep_value) via Crypt, decrypts on read (from_db_value).
+    # __init__ raises ValueError on db_index=True / unique=True / primary_key=True
+    #   (Fernet ciphertext is non-deterministic — an index/unique/PK could never match).
+    # from_db_value: on InvalidToken logs (model + field name only, never the ciphertext)
+    #   and raises DecryptionError (from InvalidToken). A missing/malformed CRYPT_SALT raises
+    #   ValueError (config error, not row damage).
+
+class DecryptionError(Exception):
+    # Stored value doesn't decrypt with the current CRYPT_SALT. Message: model + field only.
+```
+
 | Topic | Where |
 |---|---|
 | Fernet format and guarantees | https://cryptography.io/en/latest/fernet/ |
@@ -86,3 +102,12 @@ class Crypt:
   `Crypt(salt=new)` for write, then bulk re-encrypt.
 - **Errors leak structure** — `decrypt()` on garbage raises `cryptography.fernet.InvalidToken`.
   Don't surface raw exception in HTTP responses (info leak).
+- **`CryptedTextField` can't be filtered or searched** — `filter(secret=x)` never matches, and the field refuses
+  `db_index`/`unique`/`primary_key`. `dumpdata` exports the decrypted plaintext and `loaddata` re-encrypts it, so
+  fixtures and dumps carry secrets in clear text.
+- **An undecryptable row raises, on purpose** — `CryptedTextField` raises `DecryptionError` instead of reading `""`,
+  because the next `save()` of a `""` read would overwrite the ciphertext for good. Loading the row (admin change page
+  included) fails until the original `CRYPT_SALT` is back or the column is blanked with `QuerySet.update(field="")`,
+  which skips `from_db_value`. `.defer("field")` loads the rest of the row. Never "fix" it by catching and returning `""`.
+- **communicator / contact-forms `EncryptedTextField` differ** — they still read an undecryptable value as `""`.
+  Consolidating them onto `CryptedTextField` is a follow-up.

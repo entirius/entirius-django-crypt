@@ -1,6 +1,6 @@
 [project]
 name = "entirius-django-crypt"
-version = "2.0.0"
+version = "2.1.0"
 description = "Symmetric encryption helper (Fernet) for Entirius Django modules"
 keywords = ["django", "encryption", "fernet", "cryptography", "ecommerce", "entirius"]
 classifiers = [
