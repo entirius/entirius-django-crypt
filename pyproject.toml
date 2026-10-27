@@ -1,7 +1,21 @@
 [project]
 name = "entirius-django-crypt"
-version = "2.0.0"
-description = "Symmetric encryption helper (Fernet) for Volkanos Django modules"
+version = "2.1.0"
+description = "Symmetric encryption helper (Fernet) for Entirius Django modules"
+keywords = ["django", "encryption", "fernet", "cryptography", "ecommerce", "entirius"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security :: Cryptography",
+]
 authors = [{ name = "Entirius" }]
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,7 +30,11 @@ dev  = ["ruff", "pre-commit"]
 test = ["pytest", "pytest-django"]
 
 [project.urls]
+Homepage = "https://docs.entirius.com/"
+Documentation = "https://docs.entirius.com/"
 Repository = "https://github.com/entirius/entirius-django-crypt"
+Changelog = "https://github.com/entirius/entirius-django-crypt/releases"
+Issues = "https://github.com/entirius/entirius-django-crypt/issues"
 
 [build-system]
 requires = ["hatchling"]
